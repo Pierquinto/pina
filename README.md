@@ -1,0 +1,41 @@
+# Pina
+
+Pina is a small native macOS app that keeps your Mac tidy, like a good cleaning lady: it scrubs away the gigabytes you do not need. It shows what is filling your disk and memory, and clears what can safely be regenerated.
+
+Built with SwiftUI, no dependencies, no network calls, no telemetry. The interface is currently in Italian.
+
+## What it does
+
+- **Panoramica (Overview):** free disk space, memory pressure, swap, uptime and the apps using the most memory.
+- **Pulizia (Clean up):** developer caches (npm, pnpm, Bun, Yarn, pip, uv, Composer, Xcode DerivedData, Playwright, node-gyp, Homebrew), app caches (Cursor, Claude, Codex, Spotify, Chrome, only while the app is closed) and build folders (`.next`, `.astro`, `.nuxt`, `.svelte-kit`, `.turbo`, `.parcel-cache`). Every item shows its size, and nothing is deleted without a confirmation listing the exact paths.
+- **Memoria (Memory):** quit memory-heavy apps and free inactive memory with `purge` (macOS asks for the admin password itself).
+- **Disinstalla (Uninstall):** removes an app together with the files it leaves in `~/Library`, moving everything to the Trash so it can be recovered.
+- **Spazio (Space):** a read-only, drill-down map of the folders taking up space.
+
+## Safety rules
+
+- It never follows symbolic links and never touches anything outside your home folder.
+- It only removes caches and generated folders. Chats, sessions, databases and virtual machines are never on the list.
+- App caches are locked while the app is running.
+- Leftover files are matched only by exact bundle identifier or exact app name, never by partial text.
+- Cache cleanup is permanent; uninstalling goes through the Trash.
+
+## Build
+
+Requires macOS 14 or later and the Swift toolchain (the Xcode Command Line Tools are enough).
+
+```bash
+./build.sh
+```
+
+The app is installed in `~/Applications/Pina.app`. Set `BUNDLE_ID` to use your own identifier, and `DEST` to install elsewhere. To redraw the icon: `swift scripts/make-icon.swift`.
+
+The build is signed ad hoc, so the first launch may need right click → Open.
+
+Build folders are searched in common project locations in your home (`Development`, `Developer`, `Projects`, `Code`, `Sites`, `src`, `GitHub`) and in Codex and Cursor worktrees.
+
+## License
+
+Pina is **source-available**, not open source in the OSI sense. It is released under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): you can use, study, modify and share it for any noncommercial purpose. Selling it, bundling it in a paid product or using it commercially requires a separate commercial license from the author.
+
+Copyright (c) 2026 Pierquinto Manco.
