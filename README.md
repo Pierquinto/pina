@@ -36,6 +36,6 @@ Build folders are searched in common project locations in your home (`Developmen
 
 ## License
 
-Pina is **source-available**, not open source in the OSI sense. It is released under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): you can use, study, modify and share it for any noncommercial purpose. Selling it, bundling it in a paid product or using it commercially requires a separate commercial license from the author.
+Pina is **source-available**, not open source in the OSI sense. It is released under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): you can use, study, modify and share it for any noncommercial purpose. Selling it, bundling it in a paid product or using it commercially requires a separate commercial license from the author: [open an issue](https://github.com/Pierquinto/pina/issues) to ask for one.
 
 Copyright (c) 2026 Pierquinto Manco.
