@@ -12,6 +12,30 @@ final class StatoPulizia: ObservableObject {
     @Published var conferma = false
     @Published var esito: String?
 
+    private var osservatori: [NSObjectProtocol] = []
+
+    /// Quando un'app si apre o si chiude, le sue cache si bloccano o si sbloccano da sole.
+    init() {
+        let centro = NSWorkspace.shared.notificationCenter
+        for nome in [NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didLaunchApplicationNotification] {
+            osservatori.append(centro.addObserver(forName: nome, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.aggiornaBlocchi() }
+            })
+        }
+    }
+
+    deinit { osservatori.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) } }
+
+    func aggiornaBlocchi() {
+        let blocchi = Dictionary(uniqueKeysWithValues: Catalogo.cacheApp().map { ($0.id, $0.bloccata) })
+        for c in categorie.indices {
+            for v in categorie[c].voci.indices {
+                if let b = blocchi[categorie[c].voci[v].id] { categorie[c].voci[v].bloccata = b }
+            }
+        }
+        scelte = scelte.filter { id in categorie.flatMap(\.voci).contains { $0.id == id && $0.bloccata == nil } }
+    }
+
     var selezionate: [Voce] { categorie.flatMap(\.voci).filter { scelte.contains($0.id) && $0.bloccata == nil } }
     var totale: Int64 { selezionate.reduce(0) { $0 + $1.byte } }
 
@@ -122,6 +146,10 @@ struct PuliziaView: View {
             }
             Divider()
             HStack {
+                Button { Task { await s.analizza() } } label: {
+                    Label(s.analisi ? "Ricontrollo…" : "Ricontrolla", systemImage: "arrow.clockwise")
+                }
+                .disabled(s.analisi || s.lavoro)
                 if let esito = s.esito { Text(esito).foregroundStyle(.secondary) }
                 Spacer()
                 Text("Selezionato: \(Sistema.formato(s.totale))").monospacedDigit()
