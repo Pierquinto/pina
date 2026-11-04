@@ -82,6 +82,13 @@ enum Sistema {
         }.sorted { $0.byte > $1.byte }
     }
 
+    /// Rifiuta componenti "." o ".." e caratteri di controllo (a capo compreso).
+    static func percorsoSemplice(_ percorso: String) -> Bool {
+        let parti = percorso.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
+        return !parti.contains { $0 == "." || $0 == ".." || $0.isEmpty }
+            && !percorso.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    }
+
     /// Rifiuta percorsi fuori dalla home o con symlink in qualsiasi componente.
     static func percorsoReale(_ percorso: String) -> Bool {
         guard percorso.hasPrefix(home + "/") else { return false }

@@ -70,9 +70,11 @@ enum Catalogo {
             var arg = [radice, "-xdev", "(", "-type", "d", "(", "-name", ".git", "-o", "-name", "node_modules",
                        "-o", "-name", ".venv", "-o", "-name", "venv", ")", "-prune", ")", "-o", "(", "-type", "d", "("]
             for (i, n) in nomi.enumerated() { arg += (i == 0 ? [] : ["-o"]) + ["-name", n] }
-            arg += [")", "-print", "-prune", ")"]
+            // -print0: un nome di cartella con un "a capo" non deve poter spezzare un percorso in due.
+            arg += [")", "-print0", "-prune", ")"]
             let out = Sistema.esegui("/usr/bin/find", ["-P"] + arg).uscita
-            for p in out.split(separator: "\n").map(String.init) {
+            for p in out.split(separator: "\0").map(String.init)
+            where nomi.contains((p as NSString).lastPathComponent) && p.hasPrefix(radice + "/") && Sistema.percorsoSemplice(p) {
                 let progetto = (p as NSString).deletingLastPathComponent.replacingOccurrences(of: h, with: "~")
                 voci.append(Voce(id: p, titolo: "\(progetto)", dettaglio: (p as NSString).lastPathComponent, tipo: .cartella(p)))
             }
@@ -98,7 +100,7 @@ enum Catalogo {
     static func pulisci(_ v: Voce, avanzamento: (Double) -> Void) -> (falliti: Int, motivo: String?) {
         switch v.tipo {
         case .cartella(let p):
-            guard Sistema.esiste(p), Sistema.percorsoReale(p) else { return (0, "saltata: percorso cambiato o collegamento") }
+            guard Sistema.esiste(p), Sistema.percorsoSemplice(p), Sistema.percorsoReale(p) else { return (0, "saltata: percorso cambiato o collegamento") }
             let fm = FileManager.default
             let figli = (try? fm.contentsOfDirectory(atPath: p)) ?? []
             var falliti = 0
