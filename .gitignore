@@ -3,3 +3,4 @@
 Resources/AppIcon.iconset/
 .DS_Store
 *.app
+dist/

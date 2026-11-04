@@ -20,7 +20,25 @@ Built with SwiftUI, no dependencies, no network calls, no telemetry. The interfa
 - Leftover files are matched only by exact bundle identifier or exact app name, never by partial text.
 - Cache cleanup is permanent; uninstalling goes through the Trash.
 
-## Build
+## Install
+
+Requires macOS 14 Sonoma or later on a Mac with Apple Silicon (M1 or later). Intel Macs can build it from source.
+
+1. Download `Pina-<version>.zip` from the [latest release](https://github.com/Pierquinto/pina/releases/latest).
+2. Double-click the zip to extract `Pina.app`.
+3. Drag `Pina.app` into your `Applications` folder and open it.
+
+The app is signed with a Developer ID and notarized by Apple, so it opens without security warnings.
+
+Some features ask for permissions along the way:
+
+- **Free inactive memory** asks for your administrator password (macOS asks, not Pina).
+- **Uninstall** may ask for your password when an app was installed by an administrator.
+- To measure folders such as Mail or Safari data, give Pina Full Disk Access in System Settings → Privacy & Security. Without it those folders are simply skipped.
+
+To update, replace `Pina.app` with the new version. To remove Pina, drag it to the Trash.
+
+## Build from source
 
 Requires macOS 14 or later and the Swift toolchain (the Xcode Command Line Tools are enough).
 
@@ -30,7 +48,7 @@ Requires macOS 14 or later and the Swift toolchain (the Xcode Command Line Tools
 
 The app is installed in `~/Applications/Pina.app`. Set `BUNDLE_ID` to use your own identifier, and `DEST` to install elsewhere. To redraw the icon: `swift scripts/make-icon.swift`.
 
-The build is signed ad hoc, so the first launch may need right click → Open.
+A local build is signed ad hoc, so the first launch may need right click → Open. To produce a signed and notarized zip, as in the releases, use `scripts/release.sh` with your own Developer ID certificate and notarytool profile (instructions at the top of the script).
 
 Build folders are searched in common project locations in your home (`Development`, `Developer`, `Projects`, `Code`, `Sites`, `src`, `GitHub`) and in Codex and Cursor worktrees.
 
