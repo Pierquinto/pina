@@ -27,44 +27,47 @@ final class StatoPulizia: ObservableObject {
     deinit { osservatori.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) } }
 
     func aggiornaBlocchi() {
-        let blocchi = Dictionary(uniqueKeysWithValues: Catalogo.cacheApp().map { ($0.id, $0.bloccata) })
-        for c in categorie.indices {
-            for v in categorie[c].voci.indices {
-                if let b = blocchi[categorie[c].voci[v].id] { categorie[c].voci[v].bloccata = b }
+        guard !categorie.isEmpty else { return }
+        let blocchi = Dictionary(Catalogo.cacheApp().map { ($0.id, $0.bloccata) }, uniquingKeysWith: { a, _ in a })
+        var nuove = categorie
+        for c in nuove.indices {
+            for v in nuove[c].voci.indices {
+                if let b = blocchi[nuove[c].voci[v].id] { nuove[c].voci[v].bloccata = b }
             }
         }
-        scelte = scelte.filter { id in categorie.flatMap(\.voci).contains { $0.id == id && $0.bloccata == nil } }
+        categorie = nuove
+        scelte.formIntersection(pulibili.map(\.id))
     }
 
-    var selezionate: [Voce] { categorie.flatMap(\.voci).filter { scelte.contains($0.id) && $0.bloccata == nil } }
+    /// Tutto ciò che si può pulire adesso: le cache delle app aperte restano fuori.
+    var pulibili: [Voce] { categorie.flatMap(\.voci).filter { $0.bloccata == nil } }
+    var recuperabile: Int64 { pulibili.reduce(0) { $0 + $1.byte } }
+    var selezionate: [Voce] { pulibili.filter { scelte.contains($0.id) } }
     var totale: Int64 { selezionate.reduce(0) { $0 + $1.byte } }
 
-    /// Le voci bloccate (app aperta) restano fuori.
-    func selezionaTutto() {
-        scelte = Set(categorie.flatMap(\.voci).filter { $0.bloccata == nil }.map(\.id))
+    func selezionaTutto() { scelte = Set(pulibili.map(\.id)) }
+
+    private var ultimaAnalisi: Date?
+
+    /// Per la barra dei menu: rifà l'analisi solo se quella che c'è è vecchia.
+    func analizzaSeServe() async {
+        if let u = ultimaAnalisi, Date().timeIntervalSince(u) < 300 { return }
+        await analizza()
     }
 
+    private var daRifare = false
+
     func analizza() async {
+        // Una richiesta arrivata durante un'analisi non si perde: si rifà in coda a quella in corso.
+        if analisi { daRifare = true; return }
         analisi = true
-        let risultato = await Task.detached { () -> [Categoria] in
-            Catalogo.tutte().map { c in
-                var c = c
-                c.voci = c.voci.compactMap { v in
-                    var v = v
-                    switch v.tipo {
-                    case .cartella(let p):
-                        guard Sistema.esiste(p), Sistema.percorsoReale(p) else { return nil }
-                        v.byte = Sistema.dimensione(p)
-                    case .comando:
-                        v.byte = Sistema.dimensione(Sistema.home + "/Library/Caches/Homebrew")
-                    }
-                    return v.byte > 0 ? v : nil
-                }.sorted { $0.byte > $1.byte }
-                return c
-            }.filter { !$0.voci.isEmpty }
-        }.value
-        categorie = risultato
-        scelte = scelte.filter { id in risultato.contains { $0.voci.contains { $0.id == id } } }
+        repeat {
+            daRifare = false
+            let risultato = await Task.detached(priority: .userInitiated) { Catalogo.misurate() }.value
+            categorie = risultato
+            scelte.formIntersection(risultato.flatMap(\.voci).map(\.id))
+        } while daRifare
+        ultimaAnalisi = Date()
         analisi = false
     }
 
@@ -87,8 +90,21 @@ final class StatoPulizia: ObservableObject {
         return somma / Double(coda.count)
     }
 
-    func pulisci() async {
-        coda = selezionate
+    /// Pulizia avviata dalla barra dei menu: l'avanzamento si vede lì, non nella finestra.
+    @Published var rapida = false
+    @Published var confermaRapida = false
+
+    func puliziaRapida() async {
+        confermaRapida = false
+        guard !lavoro else { return }
+        rapida = true
+        await pulisci(pulibili)
+        chiudiAvanzamento()
+        rapida = false
+    }
+
+    func pulisci(_ voci: [Voce]? = nil) async {
+        coda = voci ?? selezionate
         fasi = Dictionary(uniqueKeysWithValues: coda.map { ($0.id, Fase.attesa) })
         liberati = 0
         finito = false
@@ -96,7 +112,7 @@ final class StatoPulizia: ObservableObject {
         let prima = Sistema.disco().libero
         for v in coda {
             fasi[v.id] = .inCorso(0)
-            let esitoVoce = await Task.detached {
+            let esitoVoce = await Task.detached(priority: .userInitiated) {
                 Catalogo.pulisci(v) { f in Task { @MainActor in
                     if case .inCorso = self.fasi[v.id] { self.fasi[v.id] = .inCorso(f) }
                 } }
@@ -117,7 +133,7 @@ final class StatoPulizia: ObservableObject {
 }
 
 struct PuliziaView: View {
-    @StateObject private var s = StatoPulizia()
+    @ObservedObject var s: StatoPulizia
 
     var body: some View {
         VStack(spacing: 0) {
@@ -167,7 +183,7 @@ struct PuliziaView: View {
             Button { Task { await s.analizza() } } label: { Label("Analizza", systemImage: "arrow.clockwise") }.disabled(s.analisi)
         }
         .task { if s.categorie.isEmpty { await s.analizza() } }
-        .sheet(isPresented: Binding(get: { s.lavoro }, set: { if !$0 { s.chiudiAvanzamento() } })) {
+        .sheet(isPresented: Binding(get: { s.lavoro && !s.rapida }, set: { if !$0 { s.chiudiAvanzamento() } })) {
             Avanzamento(s: s)
         }
         .confirmationDialog("Eliminare \(s.selezionate.count) elementi (\(Sistema.formato(s.totale)))?", isPresented: $s.conferma) {
@@ -198,14 +214,33 @@ struct PuliziaView: View {
 
 @MainActor
 final class StatoSpazio: ObservableObject {
+    typealias Elemento = (percorso: String, byte: Int64, cartella: Bool)
+
     @Published var percorso: [String] = []
-    @Published var voci: [(percorso: String, byte: Int64)] = []
+    @Published var voci: [Elemento] = []
     @Published var carico = false
+
+    /// Le cartelle già misurate: tornare indietro non deve rifare il conto.
+    private var misurate: [String: [Elemento]] = [:]
+
+    func carica(_ p: String, daCapo: Bool = false) async {
+        if !daCapo, let pronte = misurate[p] { voci = pronte; carico = false; return }
+        carico = true
+        let annulla = Sistema.Interruttore()
+        let trovate = await withTaskCancellationHandler {
+            await Task.detached(priority: .userInitiated) { Sistema.contenuto(p, annulla: annulla) }.value
+        } onCancel: { annulla.spegni() }
+        // Se nel frattempo si è passati a un'altra cartella, la misura è stata interrotta a metà.
+        guard !Task.isCancelled else { return }
+        misurate[p] = trovate
+        voci = trovate
+        carico = false
+    }
 }
 
 struct SpazioView: View {
     let radice: String
-    @StateObject private var s = StatoSpazio()
+    @ObservedObject var s: StatoSpazio
 
     var corrente: String { s.percorso.last ?? radice }
 
@@ -220,13 +255,14 @@ struct SpazioView: View {
             .padding(14)
             Divider()
             if s.carico {
-                ProgressView("Calcolo le dimensioni… può richiedere un minuto").frame(maxWidth: .infinity, maxHeight: .infinity)
+                ProgressView("Calcolo le dimensioni…").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                let massimo = Double(s.voci.first?.byte ?? 1)
+                let massimo = Double(max(s.voci.first?.byte ?? 1, 1))
                 List(s.voci, id: \.percorso) { v in
-                    Button { if Sistema.esiste(v.percorso) { s.percorso.append(v.percorso) } } label: {
+                    Button { if v.cartella, Sistema.esiste(v.percorso) { s.percorso.append(v.percorso) } } label: {
                         HStack {
-                            Text((v.percorso as NSString).lastPathComponent).frame(width: 260, alignment: .leading).lineLimit(1)
+                            Image(systemName: v.cartella ? "folder.fill" : "doc").foregroundStyle(v.cartella ? Color.pina : .secondary).frame(width: 18)
+                            Text((v.percorso as NSString).lastPathComponent).frame(width: 240, alignment: .leading).lineLimit(1)
                             GeometryReader { g in
                                 Capsule().fill(Color.accentColor.opacity(0.6)).frame(width: max(2, g.size.width * Double(v.byte) / massimo))
                             }
@@ -242,12 +278,11 @@ struct SpazioView: View {
             Text("Sola lettura. Le dimensioni non dicono che una cartella sia eliminabile: chat, database e macchine virtuali vivono in Application Support.")
                 .font(.caption).foregroundStyle(.secondary).padding(14)
         }
-        .task(id: corrente) {
-            s.carico = true
-            let p = corrente
-            s.voci = await Task.detached { Sistema.contenuto(p) }.value
-            s.carico = false
+        .toolbar {
+            Button { Task { await s.carica(corrente, daCapo: true) } } label: { Label("Ricalcola", systemImage: "arrow.clockwise") }
+                .disabled(s.carico)
         }
+        .task(id: corrente) { await s.carica(corrente) }
     }
 }
 

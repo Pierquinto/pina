@@ -5,77 +5,21 @@ import AppKit
 
 /// macOS gestisce la RAM da solo: "svuotarla" serve poco. Quello che aiuta davvero
 /// è chiudere le app pesanti; purge libera la memoria inattiva, con effetto temporaneo.
-@MainActor
-final class StatoMemoria: ObservableObject {
-    struct AppAttiva: Identifiable {
-        let id: pid_t
-        let nome: String
-        let icona: NSImage?
-        let byte: Int64
-        let app: NSRunningApplication
-    }
-
-    @Published var app: [AppAttiva] = []
-    @Published var pressione = Sistema.pressioneRAM()
-    @Published var swap = Sistema.swapUsato()
-    @Published var messaggio: String?
-    @Published var lavoro = false
-
-    func aggiorna() {
-        pressione = Sistema.pressioneRAM(); swap = Sistema.swapUsato()
-        Task.detached {
-            let pesi = Sistema.appPesanti()
-            await MainActor.run {
-                let mie = Bundle.main.bundleIdentifier
-                self.app = NSWorkspace.shared.runningApplications
-                    .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != mie && $0.bundleIdentifier != "com.apple.finder" }
-                    .compactMap { r in
-                        guard let nome = r.localizedName else { return nil }
-                        let byte = pesi.first { $0.nome == nome }?.byte ?? 0
-                        return AppAttiva(id: r.processIdentifier, nome: nome, icona: r.icon, byte: byte, app: r)
-                    }
-                    .sorted { $0.byte > $1.byte }
-            }
-        }
-    }
-
-    /// Chiusura normale: l'app può chiedere di salvare i documenti aperti.
-    func chiudi(_ a: AppAttiva) {
-        a.app.terminate()
-        messaggio = "Chiesto a \(a.nome) di chiudersi."
-        Task { try? await Task.sleep(for: .seconds(2)); aggiorna() }
-    }
-
-    /// purge richiede la password di amministratore, chiesta da macOS stesso.
-    func liberaInattiva() async {
-        lavoro = true
-        let swapPrima = Sistema.swapUsato()
-        let codice = await Task.detached {
-            Sistema.esegui("/usr/bin/osascript", ["-e", "do shell script \"/usr/sbin/purge\" with administrator privileges"]).codice
-        }.value
-        lavoro = false
-        messaggio = codice == 0
-            ? "Memoria inattiva liberata. Swap: \(Sistema.formato(swapPrima)) → \(Sistema.formato(Sistema.swapUsato()))."
-            : "Operazione annullata."
-        aggiorna()
-    }
-}
-
 struct MemoriaView: View {
-    @StateObject private var s = StatoMemoria()
+    @ObservedObject var m: Monitor
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 16) {
-                Scheda(titolo: "Pressione RAM", valore: [1: "normale", 2: "elevata", 4: "critica"][s.pressione] ?? "n/d",
-                       colore: [1: Color.abrasivo, 2: .orange, 4: .red][s.pressione] ?? .secondary)
-                Scheda(titolo: "Swap", valore: Sistema.formato(s.swap), colore: .secondary)
+                Scheda(titolo: "Pressione RAM", valore: m.testoPressione, colore: m.colorePressione)
+                Scheda(titolo: "RAM in uso", valore: "\(Sistema.formatoRAM(m.lettura.ram)) di \(Sistema.formatoRAM(Sistema.ramTotale))", colore: .secondary)
+                Scheda(titolo: "Swap", valore: Sistema.formatoRAM(m.lettura.swap), colore: .secondary)
                 VStack(alignment: .leading, spacing: 6) {
-                    Button { Task { await s.liberaInattiva() } } label: {
-                        Label(s.lavoro ? "Libero…" : "Libera memoria inattiva", systemImage: "wind")
+                    Button { Task { await m.liberaInattiva() } } label: {
+                        Label(m.lavoro ? "Libero…" : "Libera memoria inattiva", systemImage: "wind")
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(s.lavoro)
+                    .disabled(m.lavoro)
                     Text("Chiede la password. Effetto temporaneo.").font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -83,19 +27,19 @@ struct MemoriaView: View {
             Divider()
             Text("Chiudere le app pesanti è il modo più efficace per alleggerire la RAM.")
                 .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.top, 12)
-            List(s.app) { a in
+            List(m.attive) { a in
                 HStack(spacing: 10) {
                     if let i = a.icona { Image(nsImage: i).resizable().frame(width: 24, height: 24) }
                     Text(a.nome)
                     Spacer()
-                    Text(a.byte > 0 ? Sistema.formato(a.byte) : "—").monospacedDigit().foregroundStyle(.secondary)
-                    Button("Chiudi") { s.chiudi(a) }
+                    Text(a.byte > 0 ? Sistema.formatoRAM(a.byte) : "—").monospacedDigit().foregroundStyle(.secondary)
+                    Button("Chiudi") { m.chiudi(a) }
                 }
             }
-            if let m = s.messaggio { Text(m).font(.callout).foregroundStyle(.secondary).padding(14) }
+            if let t = m.messaggio { Text(t).font(.callout).foregroundStyle(.secondary).padding(14) }
         }
-        .toolbar { Button { s.aggiorna() } label: { Label("Aggiorna", systemImage: "arrow.clockwise") } }
-        .task { s.aggiorna() }
+        .toolbar { Button { m.aggiorna() } label: { Label("Aggiorna", systemImage: "arrow.clockwise") } }
+        .task { m.aggiorna() }
     }
 }
 
@@ -140,17 +84,15 @@ enum Disinstallatore {
                      "Saved Application State", "Logs", "HTTPStorages", "WebKit", "Cookies", "LaunchAgents",
                      "Application Scripts", "Preferences/ByHost"]
         let fm = FileManager.default
-        var trovati: [Residuo] = []
+        var percorsi: [String] = []
         for s in sotto {
             let dir = "\(lib)/\(s)"
-            for voce in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] {
-                guard corrisponde(voce, a) else { continue }
+            for voce in (try? fm.contentsOfDirectory(atPath: dir)) ?? [] where corrisponde(voce, a) {
                 let p = "\(dir)/\(voce)"
-                guard Sistema.percorsoReale(p) else { continue }
-                trovati.append(Residuo(percorso: p, byte: Sistema.dimensione(p)))
+                if Sistema.percorsoReale(p) { percorsi.append(p) }
             }
         }
-        return trovati.sorted { $0.byte > $1.byte }
+        return zip(percorsi, Sistema.dimensioni(percorsi)).map { Residuo(percorso: $0, byte: $1) }.sorted { $0.byte > $1.byte }
     }
 
     static func corrisponde(_ voce: String, _ a: AppInstallata) -> Bool {
@@ -192,14 +134,19 @@ final class StatoDisinstalla: ObservableObject {
         let elenco = await Task.detached { Disinstallatore.elencoApp() }.value
         app = elenco
         // Le dimensioni arrivano dopo, per non far aspettare l'elenco.
-        let misurate = await Task.detached { elenco.map { var a = $0; a.byte = Sistema.dimensione(a.percorso); return a } }.value
+        let misurate = await Task.detached(priority: .userInitiated) {
+            zip(elenco, Sistema.dimensioni(elenco.map(\.percorso))).map { a, byte in var a = a; a.byte = byte; return a }
+        }.value
         app = misurate
         if let s = scelta { scelta = misurate.first { $0.id == s.id } }
     }
 
     func seleziona(_ a: AppInstallata) async {
         scelta = a; residui = []; esclusi = []; messaggio = nil; carico = true
-        residui = await Task.detached { Disinstallatore.residui(di: a) }.value
+        let trovati = await Task.detached(priority: .userInitiated) { Disinstallatore.residui(di: a) }.value
+        // Se nel frattempo è stata scelta un'altra app, questi residui non sono i suoi.
+        guard scelta?.id == a.id else { return }
+        residui = trovati
         carico = false
     }
 
@@ -220,7 +167,7 @@ final class StatoDisinstalla: ObservableObject {
 }
 
 struct DisinstallaView: View {
-    @StateObject private var s = StatoDisinstalla()
+    @ObservedObject var s: StatoDisinstalla
 
     var body: some View {
         HSplitView {
@@ -230,7 +177,7 @@ struct DisinstallaView: View {
                     if let a = s.app.first(where: { $0.id == id }) { Task { await s.seleziona(a) } }
                 })) { a in
                     HStack {
-                        Image(nsImage: NSWorkspace.shared.icon(forFile: a.percorso)).resizable().frame(width: 22, height: 22)
+                        Image(nsImage: Sistema.icona(a.percorso)).resizable().frame(width: 22, height: 22)
                         Text(a.nome).lineLimit(1)
                         Spacer()
                         Text(a.byte > 0 ? Sistema.formato(a.byte) : "").font(.caption).monospacedDigit().foregroundStyle(.secondary)
@@ -255,7 +202,7 @@ struct DisinstallaView: View {
         if let a = s.scelta {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 14) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: a.percorso)).resizable().frame(width: 48, height: 48)
+                    Image(nsImage: Sistema.icona(a.percorso)).resizable().frame(width: 48, height: 48)
                     VStack(alignment: .leading) {
                         Text(a.nome).font(.title2.bold())
                         Text(a.bundleID ?? "bundle ID sconosciuto").font(.caption).foregroundStyle(.secondary)

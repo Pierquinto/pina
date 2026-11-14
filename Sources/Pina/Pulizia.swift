@@ -64,22 +64,15 @@ enum Catalogo {
     }
 
     static func buildProgetti() -> [Voce] {
-        let nomi = [".next", ".turbo", ".parcel-cache", ".nuxt", ".svelte-kit", ".astro"]
-        var voci: [Voce] = []
-        for radice in radiciProgetti where Sistema.esiste(radice) && Sistema.percorsoReale(radice) {
-            var arg = [radice, "-xdev", "(", "-type", "d", "(", "-name", ".git", "-o", "-name", "node_modules",
-                       "-o", "-name", ".venv", "-o", "-name", "venv", ")", "-prune", ")", "-o", "(", "-type", "d", "("]
-            for (i, n) in nomi.enumerated() { arg += (i == 0 ? [] : ["-o"]) + ["-name", n] }
-            // -print0: un nome di cartella con un "a capo" non deve poter spezzare un percorso in due.
-            arg += [")", "-print0", "-prune", ")"]
-            let out = Sistema.esegui("/usr/bin/find", ["-P"] + arg).uscita
-            for p in out.split(separator: "\0").map(String.init)
-            where nomi.contains((p as NSString).lastPathComponent) && p.hasPrefix(radice + "/") && Sistema.percorsoSemplice(p) {
+        let nomi: Set = [".next", ".turbo", ".parcel-cache", ".nuxt", ".svelte-kit", ".astro"]
+        let radici = radiciProgetti.filter { Sistema.esiste($0) && Sistema.percorsoReale($0) }
+        return Sistema.cercaCartelle(in: radici, nomi: nomi, saltare: [".git", "node_modules", ".venv", "venv"])
+            // Un nome di cartella con un "a capo" o un ".." non deve diventare una voce.
+            .filter { p in Sistema.percorsoSemplice(p) && radici.contains { p.hasPrefix($0 + "/") } }
+            .map { p in
                 let progetto = (p as NSString).deletingLastPathComponent.replacingOccurrences(of: h, with: "~")
-                voci.append(Voce(id: p, titolo: "\(progetto)", dettaglio: (p as NSString).lastPathComponent, tipo: .cartella(p)))
+                return Voce(id: p, titolo: progetto, dettaglio: (p as NSString).lastPathComponent, tipo: .cartella(p))
             }
-        }
-        return voci
     }
 
     static func tutte() -> [Categoria] {
@@ -91,6 +84,31 @@ enum Catalogo {
             Categoria(id: "build", titolo: "Build dei progetti", simbolo: "shippingbox",
                       nota: "Cartelle generate da Next, Astro, Nuxt e simili: si ricreano alla prossima build.", voci: buildProgetti()),
         ]
+    }
+
+    /// Il catalogo con le dimensioni, senza le voci vuote o non più valide.
+    /// Tutte le cartelle si misurano insieme, così il lavoro si divide tra i core.
+    static func misurate() -> [Categoria] {
+        let categorie = tutte()
+        var percorsi: [String: String] = [:]   // id della voce → cartella da misurare
+        for v in categorie.flatMap(\.voci) {
+            switch v.tipo {
+            case .cartella(let p): if Sistema.esiste(p), Sistema.percorsoReale(p) { percorsi[v.id] = p }
+            case .comando: percorsi[v.id] = h + "/Library/Caches/Homebrew"
+            }
+        }
+        let ordine = Array(percorsi)
+        let byte = Dictionary(uniqueKeysWithValues: zip(ordine.map(\.key), Sistema.dimensioni(ordine.map(\.value))))
+        return categorie.map { c in
+            var c = c
+            c.voci = c.voci.compactMap { v in
+                guard let b = byte[v.id], b > 0 else { return nil }
+                var v = v
+                v.byte = b
+                return v
+            }.sorted { $0.byte > $1.byte }
+            return c
+        }.filter { !$0.voci.isEmpty }
     }
 
     /// Elimina una voce un elemento alla volta, dopo aver ricontrollato che sia ancora sicuro farlo.

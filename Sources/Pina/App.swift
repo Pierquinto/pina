@@ -3,10 +3,33 @@ import AppKit
 
 @main
 struct PinaApp: App {
+    static let finestra = "principale"
+
+    // Lo stato vive qui e non nelle schermate: cambiare sezione non rifà le analisi,
+    // e la barra dei menu vede gli stessi dati della finestra.
+    @StateObject private var radice = StatoRadice()
+    @StateObject private var monitor = Monitor()
+    @StateObject private var pulizia = StatoPulizia()
+    @StateObject private var disinstalla = StatoDisinstalla()
+    @StateObject private var spazio = StatoSpazio()
+
     init() { NSApplication.shared.setActivationPolicy(.regular) }
+
     var body: some Scene {
-        WindowGroup("Pina") { Radice().frame(minWidth: 860, minHeight: 560).tint(Color.pina) }
-            .windowStyle(.hiddenTitleBar)
+        WindowGroup("Pina", id: Self.finestra) {
+            Radice(s: radice, monitor: monitor, pulizia: pulizia, disinstalla: disinstalla, spazio: spazio)
+                .frame(minWidth: 860, minHeight: 560).tint(Color.pina)
+        }
+        .windowStyle(.hiddenTitleBar)
+        // Una finestra sola: senza "Nuova finestra" non se ne aprono di doppie.
+        .commands { CommandGroup(replacing: .newItem) {} }
+
+        MenuBarExtra {
+            PannelloMenu(m: monitor, p: pulizia, radice: radice)
+        } label: {
+            EtichettaMenu(spia: monitor.spia)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 
@@ -23,10 +46,19 @@ enum Sezione: String, CaseIterable, Identifiable {
 
 // La toolchain senza Xcode non ha il plugin delle macro SwiftUI (@State):
 // lo stato delle viste vive in ObservableObject.
-final class StatoRadice: ObservableObject { @Published var sezione: Sezione? = .panoramica }
+final class StatoRadice: ObservableObject {
+    @Published var sezione: Sezione? = .panoramica
+    /// La finestra principale, per riportarla davanti dalla barra dei menu.
+    weak var finestra: NSWindow?
+}
 
 struct Radice: View {
-    @StateObject private var s = StatoRadice()
+    @ObservedObject var s: StatoRadice
+    let monitor: Monitor
+    let pulizia: StatoPulizia
+    let disinstalla: StatoDisinstalla
+    let spazio: StatoSpazio
+
     var body: some View {
         NavigationSplitView {
             List(Sezione.allCases, selection: $s.sezione) { s in
@@ -47,41 +79,28 @@ struct Radice: View {
             .navigationSplitViewColumnWidth(200)
         } detail: {
             switch s.sezione ?? .panoramica {
-            case .panoramica: Panoramica()
-            case .pulizia: PuliziaView()
-            case .memoria: MemoriaView()
-            case .app: DisinstallaView()
-            case .spazio: SpazioView(radice: Sistema.home)
+            case .panoramica: Panoramica(m: monitor)
+            case .pulizia: PuliziaView(s: pulizia)
+            case .memoria: MemoriaView(m: monitor)
+            case .app: DisinstallaView(s: disinstalla)
+            case .spazio: SpazioView(radice: Sistema.home, s: spazio)
             }
         }
+        .background(Aggancio { s.finestra = $0; monitor.finestra = $0 })
     }
 }
 
 // MARK: - Panoramica
 
-@MainActor
-final class StatoPanoramica: ObservableObject {
-    @Published var disco = Sistema.disco()
-    @Published var pressione = Sistema.pressioneRAM()
-    @Published var swap = Sistema.swapUsato()
-    @Published var app: [(nome: String, byte: Int64)] = []
-
-    func aggiorna() {
-        disco = Sistema.disco(); pressione = Sistema.pressioneRAM(); swap = Sistema.swapUsato()
-        Task.detached { let a = Sistema.appPesanti(); await MainActor.run { self.app = a } }
-    }
-}
-
 struct Panoramica: View {
-    @StateObject private var s = StatoPanoramica()
-    var disco: Sistema.Disco { s.disco }
-    var pressione: Int { s.pressione }
+    @ObservedObject var m: Monitor
+    var disco: Sistema.Disco { m.lettura.disco }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(spacing: 32) {
-                    Anello(valore: 1 - Double(disco.libero) / Double(max(disco.totale, 1)), colore: coloreDisco)
+                    Anello(valore: 1 - Double(disco.libero) / Double(max(disco.totale, 1)), colore: m.coloreDisco)
                         .frame(width: 150, height: 150)
                         .overlay {
                             VStack {
@@ -101,27 +120,24 @@ struct Panoramica: View {
                     }
                 }
                 HStack(spacing: 16) {
-                    Scheda(titolo: "Pressione RAM", valore: testoPressione, colore: colorePressione)
-                    Scheda(titolo: "Swap", valore: Sistema.formato(s.swap), colore: .secondary)
+                    Scheda(titolo: "Pressione RAM", valore: m.testoPressione, colore: m.colorePressione)
+                    Scheda(titolo: "RAM in uso", valore: "\(m.percentualeRAM)%", colore: .secondary)
+                    Scheda(titolo: "Swap", valore: Sistema.formatoRAM(m.lettura.swap), colore: .secondary)
                     Scheda(titolo: "Acceso da", valore: "\(Sistema.giorniAcceso()) giorni", colore: .secondary)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("App che occupano più memoria").font(.headline)
-                    ForEach(s.app, id: \.nome) { a in
-                        HStack { Text(a.nome); Spacer(); Text(Sistema.formato(a.byte)).monospacedDigit().foregroundStyle(.secondary) }
+                    ForEach(m.pesanti) { a in
+                        HStack { Text(a.nome); Spacer(); Text(Sistema.formatoRAM(a.byte)).monospacedDigit().foregroundStyle(.secondary) }
                         Divider()
                     }
                 }
             }
             .padding(28)
         }
-        .toolbar { Button { s.aggiorna() } label: { Label("Aggiorna", systemImage: "arrow.clockwise") } }
-        .task { s.aggiorna() }
+        .toolbar { Button { m.aggiorna() } label: { Label("Aggiorna", systemImage: "arrow.clockwise") } }
+        .task { m.aggiorna() }
     }
-
-    var coloreDisco: Color { disco.libero < 5 << 30 ? .red : disco.libero < 40 << 30 ? .orange : .abrasivo }
-    var testoPressione: String { [1: "normale", 2: "elevata", 4: "critica"][pressione] ?? "n/d" }
-    var colorePressione: Color { [1: Color.abrasivo, 2: .orange, 4: .red][pressione] ?? .secondary }
 }
 
 struct Anello: View {

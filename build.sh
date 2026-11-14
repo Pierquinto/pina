@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 BUNDLE_ID="${BUNDLE_ID:-app.pina.mac}"
-VERSIONE="0.1.0"
+VERSIONE="0.2.0"
 swift build -c release
 APP="${DEST:-$HOME/Applications}/Pina.app"
 rm -rf "$APP"

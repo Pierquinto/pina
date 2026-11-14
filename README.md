@@ -10,7 +10,10 @@ Built with SwiftUI, no dependencies, no network calls, no telemetry. The interfa
 - **Pulizia (Clean up):** developer caches (npm, pnpm, Bun, Yarn, pip, uv, Composer, Xcode DerivedData, Playwright, node-gyp, Homebrew), app caches (Cursor, Claude, Codex, Spotify, Chrome, only while the app is closed) and build folders (`.next`, `.astro`, `.nuxt`, `.svelte-kit`, `.turbo`, `.parcel-cache`). Every item shows its size, and nothing is deleted without a confirmation listing the exact paths.
 - **Memoria (Memory):** quit memory-heavy apps and free inactive memory with `purge` (macOS asks for the admin password itself).
 - **Disinstalla (Uninstall):** removes an app together with the files it leaves in `~/Library`, moving everything to the Trash so it can be recovered.
-- **Spazio (Space):** a read-only, drill-down map of the folders taking up space.
+- **Spazio (Space):** a read-only, drill-down map of the folders and files taking up space.
+- **Menu bar indicator:** shows how much memory is in use and opens a panel with two quick actions. *Free memory*: quit the heaviest apps or free inactive memory. *Free space*: remove every cache and build folder that is safe to delete right now, after showing the exact list.
+
+Folder sizes are measured natively on all CPU cores, so scans take a fraction of the time `du` would need. Pina keeps running in the menu bar when you close its window; quit it from the panel or with ⌘Q.
 
 ## Safety rules
 
