@@ -2,7 +2,7 @@
 
 Pina is a small native macOS app that keeps your Mac tidy, like a good cleaning lady: it scrubs away the gigabytes you do not need. It shows what is filling your disk and memory, and clears what can safely be regenerated.
 
-Built with SwiftUI, no dependencies, no network calls, no telemetry. The interface is currently in Italian.
+Built with SwiftUI, no dependencies, no telemetry. The only network call is a daily check for a newer release on GitHub (see [Updates](#updates)). The interface is currently in Italian.
 
 ## What it does
 
@@ -39,7 +39,19 @@ Some features ask for permissions along the way:
 - **Uninstall** may ask for your password when an app was installed by an administrator.
 - To measure folders such as Mail or Safari data, give Pina Full Disk Access in System Settings → Privacy & Security. Without it those folders are simply skipped.
 
-To update, replace `Pina.app` with the new version. To remove Pina, drag it to the Trash.
+To remove Pina, drag it to the Trash.
+
+## Updates
+
+Once a day Pina asks GitHub whether a newer release exists. If there is one, a notice appears in the menu bar panel and in the sidebar, with a button that opens the release page. Nothing is downloaded or installed automatically: to update, download the new zip and replace `Pina.app`.
+
+The check sends no data beyond the request itself and keeps no cookies. To turn it off:
+
+```bash
+defaults write app.pina.mac ControlloAggiornamenti -bool NO
+```
+
+Versions 0.1.0 and 0.2.0 do not include the check, so they have to be updated by hand once.
 
 ## Build from source
 

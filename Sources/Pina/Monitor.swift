@@ -158,10 +158,15 @@ struct PannelloMenu: View {
     @ObservedObject var m: Monitor
     @ObservedObject var p: StatoPulizia
     @ObservedObject var radice: StatoRadice
+    @ObservedObject var aggiornamenti: Aggiornamenti
     @Environment(\.openWindow) private var apriFinestra
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if aggiornamenti.nuova != nil {
+                AvvisoAggiornamento(a: aggiornamenti)
+                Divider()
+            }
             memoria
             Divider()
             disco

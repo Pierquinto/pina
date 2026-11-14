@@ -12,12 +12,13 @@ struct PinaApp: App {
     @StateObject private var pulizia = StatoPulizia()
     @StateObject private var disinstalla = StatoDisinstalla()
     @StateObject private var spazio = StatoSpazio()
+    @StateObject private var aggiornamenti = Aggiornamenti()
 
     init() { NSApplication.shared.setActivationPolicy(.regular) }
 
     var body: some Scene {
         WindowGroup("Pina", id: Self.finestra) {
-            Radice(s: radice, monitor: monitor, pulizia: pulizia, disinstalla: disinstalla, spazio: spazio)
+            Radice(s: radice, monitor: monitor, pulizia: pulizia, disinstalla: disinstalla, spazio: spazio, aggiornamenti: aggiornamenti)
                 .frame(minWidth: 860, minHeight: 560).tint(Color.pina)
         }
         .windowStyle(.hiddenTitleBar)
@@ -25,7 +26,7 @@ struct PinaApp: App {
         .commands { CommandGroup(replacing: .newItem) {} }
 
         MenuBarExtra {
-            PannelloMenu(m: monitor, p: pulizia, radice: radice)
+            PannelloMenu(m: monitor, p: pulizia, radice: radice, aggiornamenti: aggiornamenti)
         } label: {
             EtichettaMenu(spia: monitor.spia)
         }
@@ -58,6 +59,7 @@ struct Radice: View {
     let pulizia: StatoPulizia
     let disinstalla: StatoDisinstalla
     let spazio: StatoSpazio
+    let aggiornamenti: Aggiornamenti
 
     var body: some View {
         NavigationSplitView {
@@ -75,6 +77,11 @@ struct Radice: View {
                     Spacer()
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
+            }
+            .safeAreaInset(edge: .bottom) {
+                AvvisoAggiornamento(a: aggiornamenti, inColonna: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
             }
             .navigationSplitViewColumnWidth(200)
         } detail: {
